@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 400px;
+      max-height: 600px;
+      padding: 0;
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+    }
+    
+    .header {
+      background: #2196F3;
+      color: white;
+      padding: 15px;
+      text-align: center;
+      margin-bottom: 0;
+    }
+    
+    .header h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+    
+    .tabs {
+      display: flex;
+      background: white;
+      border-bottom: 1px solid #ddd;
+    }
+    
+    .tab-button {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      background: white;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    
+    .tab-button.active {
+      border-bottom-color: #2196F3;
+      color: #2196F3;
+      font-weight: bold;
+    }
+    
+    .tab-button:hover {
+      background: #f0f0f0;
+    }
+    
+    .tab-content {
+      display: none;
+      padding: 15px;
+      background: white;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    
+    .tab-content.active {
+      display: block;
+    }
+    
+    .stats {
+      margin-bottom: 15px;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    
+    .stats div {
+      margin: 5px 0;
+    }
+    
+    .button {
+      width: 100%;
+      padding: 10px;
+      margin: 5px 0;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    
+    .button.small {
+      width: auto;
+      padding: 5px 10px;
+      margin: 2px;
+      font-size: 12px;
+    }
+    
+    .primary { background-color: #4CAF50; color: white; }
+    .primary:hover { background-color: #45a049; }
+    .secondary { background-color: #008CBA; color: white; }
+    .secondary:hover { background-color: #007bb5; }
+    .danger { background-color: #f44336; color: white; }
+    .danger:hover { background-color: #da190b; }
+    
+    .recent-urls h4 {
+      margin: 15px 0 10px 0;
+      font-size: 14px;
+      color: #333;
+    }
+    
+    .url-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    
+    .history-controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+      flex-wrap: wrap;
+    }
+    
+    .search-input {
+      flex: 1;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    
+    .filter-select {
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    
+    .history-stats {
+      margin-bottom: 15px;
+      padding: 8px;
+      background: #e3f2fd;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #1976d2;
+    }
+    
+    .history-list {
+      max-height: 350px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    
+    .url-item {
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      transition: background 0.2s;
+    }
+    
+    .url-item:hover {
+      background: #f0f8ff;
+    }
+    
+    .url-item:last-child {
+      border-bottom: none;
+    }
+    
+    .url-title {
+      font-weight: bold;
+      margin-bottom: 4px;
+      font-size: 13px;
+      color: #333;
+    }
+    
+    .url-address {
+      color: #666;
+      font-size: 12px;
+      word-break: break-all;
+      margin-bottom: 4px;
+    }
+    
+    .url-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: #999;
+    }
+    
+    .url-domain {
+      background: #e1f5fe;
+      color: #0277bd;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+    
+    .url-time {
+      font-size: 11px;
+      color: #666;
+    }
+    
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid #ddd;
+    }
+    
+    .domain-list {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    
+    .domain-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      transition: background 0.2s;
+    }
+    
+    .domain-item:hover {
+      background: #f0f8ff;
+    }
+    
+    .domain-name {
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .domain-count {
+      background: #2196F3;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+    }
+    
+    .no-data {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+      font-style: italic;
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h3>URL Tracker</h3>
+  </div>
+  
+  <div class="tabs">
+    <button class="tab-button active" data-tab="stats">Stats</button>
+    <button class="tab-button" data-tab="history">History</button>
+    <button class="tab-button" data-tab="domains">Domains</button>
+  </div>
+
+  <div class="tab-content active" id="stats-tab">
+    <div class="stats">
+      <div>Total URLs tracked: <span id="totalCount">0</span></div>
+      <div>Unique domains: <span id="uniqueDomains">0</span></div>
+      <div>Python connection: <span id="pythonStatus">Checking...</span></div>
+    </div>
+    
+    <button class="button primary" id="exportBtn">Export URLs to File</button>
+    <button class="button secondary" id="testPythonBtn">Test Python Connection</button>
+    <button class="button danger" id="clearBtn">Clear History</button>
+    
+    <div class="recent-urls">
+      <h4>Recent URLs</h4>
+      <div class="url-list" id="recentUrlList"></div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="history-tab">
+    <div class="history-controls">
+      <input type="text" id="searchInput" placeholder="Search URLs or titles..." class="search-input">
+      <select id="filterSelect" class="filter-select">
+        <option value="all">All URLs</option>
+        <option value="today">Today</option>
+        <option value="week">This Week</option>
+        <option value="month">This Month</option>
+      </select>
+      <button class="button small" id="refreshBtn">Refresh</button>
+    </div>
+    
+    <div class="history-stats">
+      <span id="historyCount">0 URLs</span> | 
+      <span id="historyRange">All Time</span>
+    </div>
+    
+    <div class="history-list" id="historyList"></div>
+    
+    <div class="pagination">
+      <button class="button small" id="prevBtn">Previous</button>
+      <span id="pageInfo">Page 1 of 1</span>
+      <button class="button small" id="nextBtn">Next</button>
+    </div>
+  </div>
+
+  <div class="tab-content" id="domains-tab">
+    <div class="domain-stats">
+      <h4>Top Domains</h4>
+      <div class="domain-list" id="domainList"></div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

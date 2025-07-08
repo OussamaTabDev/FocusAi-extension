@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "URL Tracker",
+  "version": "1.0",
+  "description": "Tracks visited URLs and sends them to a Python script",
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "URL Tracker"
+  }
+}
