@@ -1,12 +1,13 @@
 {
-  "manifest_version": 3,
-  "name": "URL Tracker",
+  "manifest_version": 4,
+  "name": "FocusAi Extension",
   "version": "1.0",
-  "description": "Tracks visited URLs and sends them to a Python script",
+  "description": "A Chrome extension to track and manage URLs with AI assistance, and Comprehensive browser tab tracking and control",
   "permissions": [
     "tabs",
     "activeTab",
-    "storage"
+    "storage",
+    "http://localhost:8000/*"
   ],
   "background": {
     "service_worker": "background.js"
