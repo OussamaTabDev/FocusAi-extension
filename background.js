@@ -219,3 +219,151 @@ function sendToPython(urlData) {
     console.error('Error sending to Python:', error);
   });
 }
+
+
+// background.js - Service Worker for blocking functionality
+
+let blockedDomains = [];
+
+// Initialize when extension starts
+chrome.runtime.onStartup.addListener(initializeBlocking);
+chrome.runtime.onInstalled.addListener(initializeBlocking);
+
+async function initializeBlocking() {
+    // Load blocked domains from storage
+    const result = await chrome.storage.sync.get(['blockedDomains']);
+    blockedDomains = result.blockedDomains || [];
+    
+    // Set up blocking rules
+    updateBlockingRules();
+}
+
+// Listen for messages from popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'updateBlockingRules') {
+        blockedDomains = request.domains || [];
+        updateBlockingRules();
+        sendResponse({ success: true });
+    }
+});
+
+// Method 1: Using chrome.webRequest (Manifest V2 or V3 with special permissions)
+function updateBlockingRules() {
+    // Remove existing listener
+    if (chrome.webRequest.onBeforeRequest.hasListener(blockRequestHandler)) {
+        chrome.webRequest.onBeforeRequest.removeListener(blockRequestHandler);
+    }
+    
+    // Add new listener if we have domains to block
+    if (blockedDomains.some(d => d.enabled)) {
+        chrome.webRequest.onBeforeRequest.addListener(
+            blockRequestHandler,
+            { urls: ["<all_urls>"] },
+            ["blocking"]
+        );
+    }
+}
+
+function blockRequestHandler(details) {
+    try {
+        const url = new URL(details.url);
+        const domain = url.hostname.replace(/^www\./, '');
+        
+        // Check if this domain should be blocked
+        const shouldBlock = blockedDomains.some(d => 
+            d.enabled && isDomainMatch(domain, d.domain)
+        );
+        
+        if (shouldBlock) {
+            console.log(`Blocked request to: ${domain}`);
+            
+            // Update block statistics
+            updateBlockStats();
+            
+            // Show notification (optional)
+            if (chrome.notifications) {
+                chrome.notifications.create({
+                    type: 'basic',
+                    iconUrl: 'icons/icon48.png',
+                    title: 'Domain Blocked',
+                    message: `Access to ${domain} has been blocked`
+                });
+            }
+            
+            return { cancel: true };
+        }
+        
+        return { cancel: false };
+    } catch (error) {
+        console.error('Error in block handler:', error);
+        return { cancel: false };
+    }
+}
+
+function isDomainMatch(requestDomain, blockedDomain) {
+    requestDomain = requestDomain.toLowerCase();
+    blockedDomain = blockedDomain.toLowerCase();
+    
+    // Exact match
+    if (requestDomain === blockedDomain) return true;
+    
+    // Subdomain match
+    if (requestDomain.endsWith('.' + blockedDomain)) return true;
+    
+    return false;
+}
+
+async function updateBlockStats() {
+    const today = new Date().toDateString();
+    const result = await chrome.storage.local.get(['blockStats']);
+    let blockStats = result.blockStats || { totalBlocksToday: 0, lastReset: today };
+    
+    // Reset if new day
+    if (blockStats.lastReset !== today) {
+        blockStats = { totalBlocksToday: 0, lastReset: today };
+    }
+    
+    blockStats.totalBlocksToday++;
+    await chrome.storage.local.set({ blockStats });
+}
+
+// Method 2: Alternative using Declarative Net Request (Manifest V3 preferred)
+// Uncomment this section if you prefer using declarativeNetRequest
+
+/*
+async function updateBlockingRulesDeclarative() {
+    // Clear existing rules
+    await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: await getAllRuleIds()
+    });
+    
+    // Add new rules for enabled domains
+    const rules = [];
+    let ruleId = 1;
+    
+    blockedDomains.forEach(domainObj => {
+        if (domainObj.enabled) {
+            rules.push({
+                id: ruleId++,
+                priority: 1,
+                action: { type: "block" },
+                condition: {
+                    urlFilter: `*://*.${domainObj.domain}/*`,
+                    resourceTypes: ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"]
+                }
+            });
+        }
+    });
+    
+    if (rules.length > 0) {
+        await chrome.declarativeNetRequest.updateDynamicRules({
+            addRules: rules
+        });
+    }
+}
+
+async function getAllRuleIds() {
+    const rules = await chrome.declarativeNetRequest.getDynamicRules();
+    return rules.map(rule => rule.id);
+}
+*/

@@ -7,7 +7,14 @@
     "tabs",
     "activeTab",
     "storage",
-    "http://localhost:8000/*"
+    "http://localhost:8000/*",
+    "declarativeNetRequest",   
+    "declarativeNetRequestFeedback",
+    "webRequest",
+    "webRequestBlocking",
+    "history",
+    "<all_urls>",
+    "notifications"
   ],
   "background": {
     "service_worker": "background.js"
@@ -18,8 +25,11 @@
       "js": ["content.js"]
     }
   ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "URL Tracker"
+    "default_title": "FocusAi Extension"
   }
 }
