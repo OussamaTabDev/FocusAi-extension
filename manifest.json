@@ -1,20 +1,18 @@
 {
-  "manifest_version": 4,
+  "manifest_version": 3,
   "name": "FocusAi Extension",
-  "version": "1.0",
-  "description": "A Chrome extension to track and manage URLs with AI assistance, and Comprehensive browser tab tracking and control",
+  "version": "2.0",
+  "description": "AI-powered URL tracking and blocking extension",
   "permissions": [
     "tabs",
-    "activeTab",
     "storage",
-    "http://localhost:8000/*",
-    "declarativeNetRequest",   
-    "declarativeNetRequestFeedback",
-    "webRequest",
-    "webRequestBlocking",
-    "history",
+    "notifications",
+    "declarativeNetRequest",
+    "declarativeNetRequestFeedback"
+  ],
+  "host_permissions": [
     "<all_urls>",
-    "notifications"
+    "http://localhost:8000/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -25,11 +23,24 @@
       "js": ["content.js"]
     }
   ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "FocusAi Extension"
+  },
+  "icons": {
+    "16": "icons/icon_16.png",
+    "24": "icons/icon_24.png",
+    "32": "icons/icon_32.png",
+    "48": "icons/icon_48.png",
+    "128": "icons/icon_128.png"
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "block_rules",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
   }
 }

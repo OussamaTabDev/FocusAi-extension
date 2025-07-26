@@ -1,4 +1,4 @@
-// popup.js - Updated for URL Explorer design
+// popup.js - Updated for URL Explorer design with integrated blocking functionality
 
 // --- GLOBAL STATE ---
 let currentPage = 1;
@@ -7,13 +7,32 @@ let allHistory = [];
 let filteredHistory = [];
 const SETTINGS_KEY = 'urlExplorerSettings';
 
+// Blocking functionality state
+let blockedDomains = [];
+let blockStats = {
+    totalBlocksToday: 0,
+    lastReset: new Date().toDateString()
+};
+
 // --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', function() {
     initializeTabs();
     setupEventListeners();
     loadAndDisplayAllData(); // Main data loading function
     loadSettings();
+    initBlocking(); // Initialize blocking functionality
 });
+
+/**
+ * Initialize blocking functionality
+ */
+async function initBlocking() {
+    await loadBlockedDomains();
+    await loadBlockStats();
+    updateBlockedDomainsList();
+    updateBlockingStats();
+    loadDomainSuggestions();
+}
 
 /**
  * Sets up tab navigation functionality.
@@ -42,6 +61,9 @@ function initializeTabs() {
                 case 'domains':
                     loadDomainsTab();
                     break;
+                case 'blocking':
+                    loadBlockingTab();
+                    break;
             }
         });
     });
@@ -64,15 +86,14 @@ function setupEventListeners() {
     document.getElementById('prevPage')?.addEventListener('click', () => changePage(-1));
     document.getElementById('nextPage')?.addEventListener('click', () => changePage(1));
 
-    // Blocking
-    document.getElementById('addDomainBtn')?.addEventListener('click', () => this.focusDomainInput());
-    document.getElementById('addDomainSubmit')?.addEventListener('click', () => this.addBlockedDomain());
+    // Blocking Tab
+    document.getElementById('addDomainBtn')?.addEventListener('click', focusDomainInput);
+    document.getElementById('addDomainSubmit')?.addEventListener('click', addDomain);
     document.getElementById('domainInput')?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') this.addBlockedDomain();
+        if (e.key === 'Enter') addDomain();
     });
-    document.getElementById('importBlocklistBtn')?.addEventListener('click', () => this.importBlocklist());
-    document.getElementById('toggleAllBlocking')?.addEventListener('click', () => this.toggleAllBlocking());
-
+    document.getElementById('importBlocklistBtn')?.addEventListener('click', importBlocklist);
+    document.getElementById('toggleAllBlocking')?.addEventListener('click', toggleAllBlocking);
 
     // Domains Tab
     document.getElementById('domainReportBtn')?.addEventListener('click', () => showToast('Domain reports coming soon!'));
@@ -81,6 +102,321 @@ function setupEventListeners() {
     document.getElementById('saveSettings')?.addEventListener('click', saveSettings);
     document.getElementById('exportAllBtn')?.addEventListener('click', exportUrls);
     document.getElementById('clearAllBtn')?.addEventListener('click', clearHistory);
+}
+
+// --- BLOCKING FUNCTIONALITY ---
+
+/**
+ * Load blocked domains from storage
+ */
+async function loadBlockedDomains() {
+    const result = await chrome.storage.sync.get('blockedDomains');
+    blockedDomains = result.blockedDomains || [];
+}
+
+/**
+ * Save blocked domains to storage
+ */
+async function saveBlockedDomains() {
+    await chrome.storage.sync.set({ blockedDomains });
+    updateBlockedCount();
+    // Notify background script to update rules
+    chrome.runtime.sendMessage({
+        action: 'updateBlockingRules',
+        domains: blockedDomains
+    });
+}
+
+/**
+ * Load block statistics from storage
+ */
+async function loadBlockStats() {
+    const result = await chrome.storage.local.get('blockStats');
+    if (result.blockStats) {
+        // Reset stats if it's a new day
+        if (result.blockStats.lastReset !== new Date().toDateString()) {
+            blockStats = {
+                totalBlocksToday: 0,
+                lastReset: new Date().toDateString()
+            };
+        } else {
+            blockStats = result.blockStats;
+        }
+    }
+}
+
+/**
+ * Save block statistics to storage
+ */
+async function saveBlockStats() {
+    await chrome.storage.local.set({ blockStats });
+}
+
+/**
+ * Focus the domain input field
+ */
+function focusDomainInput() {
+    const domainInput = document.getElementById('domainInput');
+    if (domainInput) {
+        domainInput.focus();
+    }
+}
+
+/**
+ * Add a new domain to block
+ */
+async function addDomain() {
+    const domainInput = document.getElementById('domainInput');
+    let domain = domainInput.value.trim();
+    if (!domain) return;
+    
+    domain = domain.replace(/^https?:\/\//, '').split('/')[0].replace(/^www\./, '');
+    
+    if (!isValidDomain(domain)) {
+        showToast("Please enter a valid domain (e.g., example.com)", "error");
+        return;
+    }
+    
+    if (blockedDomains.some(d => d.domain === domain)) {
+        showToast("This domain is already blocked", "error");
+        return;
+    }
+    
+    blockedDomains.unshift({
+        domain,
+        enabled: true,
+        dateAdded: new Date().toISOString()
+    });
+    
+    await saveBlockedDomains();
+    updateBlockedDomainsList();
+    domainInput.value = '';
+    showToast(`${domain} has been blocked`, "success");
+}
+
+/**
+ * Validate domain format
+ */
+function isValidDomain(domain) {
+    return /^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$/i.test(domain);
+}
+
+/**
+ * Update the blocked domains list UI
+ */
+function updateBlockedDomainsList() {
+    const blockedDomainsList = document.getElementById('blockedDomainsList');
+    if (!blockedDomainsList) return;
+    
+    blockedDomainsList.innerHTML = '';
+    
+    if (blockedDomains.length === 0) {
+        blockedDomainsList.innerHTML = `
+            <div class="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <p>No domains blocked yet</p>
+            </div>
+        `;
+        return;
+    }
+    
+    blockedDomains.forEach((domainObj, index) => {
+        const domainElement = document.createElement('div');
+        domainElement.className = 'blocked-domain-item';
+        domainElement.innerHTML = `
+            <div class="blocked-domain-info">
+                <div class="blocked-domain-name">${domainObj.domain}</div>
+                <div class="blocked-domain-meta">Added ${formatDate(domainObj.dateAdded)}</div>
+            </div>
+            <div class="blocked-domain-actions">
+                <div class="blocked-domain-toggle ${domainObj.enabled ? 'active' : ''}" data-index="${index}"></div>
+                <button class="remove-domain-btn" data-index="${index}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M3 6h18"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+            </div>
+        `;
+        
+        // Add event listeners
+        const toggle = domainElement.querySelector('.blocked-domain-toggle');
+        toggle.addEventListener('click', () => toggleDomain(index));
+        
+        const removeBtn = domainElement.querySelector('.remove-domain-btn');
+        removeBtn.addEventListener('click', () => removeDomain(index));
+        
+        blockedDomainsList.appendChild(domainElement);
+    });
+}
+
+/**
+ * Toggle domain blocking status
+ */
+async function toggleDomain(index) {
+    blockedDomains[index].enabled = !blockedDomains[index].enabled;
+    await saveBlockedDomains();
+    updateBlockedDomainsList();
+    showToast(
+        `${blockedDomains[index].domain} has been ${blockedDomains[index].enabled ? 'enabled' : 'disabled'}`,
+        "success"
+    );
+}
+
+/**
+ * Remove a blocked domain
+ */
+async function removeDomain(index) {
+    const domain = blockedDomains[index].domain;
+    if (confirm(`Are you sure you want to unblock ${domain}?`)) {
+        blockedDomains.splice(index, 1);
+        await saveBlockedDomains();
+        updateBlockedDomainsList();
+        showToast(`${domain} has been unblocked`, "success");
+    }
+}
+
+/**
+ * Toggle all domains on/off
+ */
+async function toggleAllBlocking() {
+    const allEnabled = blockedDomains.every(d => d.enabled);
+    const newState = !allEnabled;
+    
+    blockedDomains.forEach(d => d.enabled = newState);
+    await saveBlockedDomains();
+    updateBlockedDomainsList();
+    
+    const toggleBtn = document.getElementById('toggleAllBlocking');
+    if (toggleBtn) {
+        toggleBtn.textContent = newState ? 'Disable All' : 'Enable All';
+    }
+    
+    showToast(`All domains have been ${newState ? 'enabled' : 'disabled'}`, "success");
+}
+
+/**
+ * Import blocklist from file
+ */
+async function importBlocklist() {
+    try {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.txt';
+        
+        input.onchange = async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const content = await file.text();
+            const domains = content.split('\n')
+                .map(line => line.trim())
+                .filter(line => line && !line.startsWith('#') && !line.startsWith('//'))
+                .map(line => line.replace(/^https?:\/\//, '').split('/')[0].replace(/^www\./, ''));
+            
+            let addedCount = 0;
+            
+            for (const domain of domains) {
+                if (!isValidDomain(domain)) continue;
+                
+                if (!blockedDomains.some(d => d.domain === domain)) {
+                    blockedDomains.push({
+                        domain,
+                        enabled: true,
+                        dateAdded: new Date().toISOString()
+                    });
+                    addedCount++;
+                }
+            }
+            
+            if (addedCount > 0) {
+                await saveBlockedDomains();
+                updateBlockedDomainsList();
+                showToast(`Imported ${addedCount} new domains`, "success");
+            } else {
+                showToast("No new domains to import", "warning");
+            }
+        };
+        
+        input.click();
+    } catch (err) {
+        showToast("Failed to import blocklist", "error");
+    }
+}
+
+/**
+ * Load blocking tab data
+ */
+function loadBlockingTab() {
+    if (document.getElementById('blocking-tab')?.classList.contains('active')) {
+        updateBlockedDomainsList();
+        updateBlockingStats();
+        loadDomainSuggestions();
+    }
+}
+
+/**
+ * Update blocking statistics
+ */
+function updateBlockingStats() {
+    const blockedCount = document.getElementById('blockedCount');
+    const blocksToday = document.getElementById('blocksToday');
+    
+    if (blockedCount) blockedCount.textContent = blockedDomains.length;
+    if (blocksToday) blocksToday.textContent = blockStats.totalBlocksToday;
+}
+
+/**
+ * Update blocked count display
+ */
+function updateBlockedCount() {
+    const blockedCount = document.getElementById('blockedCount');
+    if (blockedCount) {
+        blockedCount.textContent = blockedDomains.length;
+    }
+}
+
+/**
+ * Load domain suggestions
+ */
+function loadDomainSuggestions() {
+    const domainSuggestions = document.getElementById('domainSuggestions');
+    if (!domainSuggestions) return;
+    
+    const suggestions = [
+        'facebook.com',
+        'twitter.com',
+        'youtube.com',
+        'reddit.com',
+        'instagram.com',
+        'tiktok.com',
+        'netflix.com',
+        'twitch.tv'
+    ];
+    
+    domainSuggestions.innerHTML = '';
+    
+    suggestions.forEach(domain => {
+        // Skip if already blocked
+        if (blockedDomains.some(d => d.domain === domain)) return;
+        
+        const pill = document.createElement('span');
+        pill.className = 'domain-pill';
+        pill.textContent = domain;
+        pill.addEventListener('click', () => {
+            const domainInput = document.getElementById('domainInput');
+            if (domainInput) {
+                domainInput.value = domain;
+                domainInput.focus();
+            }
+        });
+        
+        domainSuggestions.appendChild(pill);
+    });
 }
 
 // --- DATA LOADING & DISPLAY ---
@@ -103,6 +439,9 @@ function loadAndDisplayAllData() {
         }
         if (document.getElementById('domains-tab').classList.contains('active')) {
             loadDomainsTab();
+        }
+        if (document.getElementById('blocking-tab').classList.contains('active')) {
+            loadBlockingTab();
         }
     });
 }
@@ -138,12 +477,16 @@ function updateDashboardStats() {
     const growthSign = growthRate >= 0 ? '+' : '';
 
     // Update UI elements
-    document.getElementById('totalUrls').textContent = totalCount;
-    document.getElementById('totalDomains').textContent = uniqueDomains;
-    document.getElementById('todayCount').textContent = todayCount;
-    document.getElementById('growthRate').textContent = `${growthSign}${growthRate.toFixed(0)}%`;
+    const totalUrls = document.getElementById('totalUrls');
+    const totalDomains = document.getElementById('totalDomains');
+    const todayCountEl = document.getElementById('todayCount');
+    const growthRateEl = document.getElementById('growthRate');
+    
+    if (totalUrls) totalUrls.textContent = totalCount;
+    if (totalDomains) totalDomains.textContent = uniqueDomains;
+    if (todayCountEl) todayCountEl.textContent = todayCount;
+    if (growthRateEl) growthRateEl.textContent = `${growthSign}${growthRate.toFixed(0)}%`;
 }
-
 
 /**
  * Loads the 5 most recent URLs into the "Recent Activity" list on the dashboard.
@@ -151,6 +494,8 @@ function updateDashboardStats() {
 function loadRecentActivity() {
     const recentActivity = allHistory.slice(-5).reverse();
     const activityList = document.getElementById('recentActivity');
+    if (!activityList) return;
+    
     activityList.innerHTML = ''; // Clear previous items
 
     if (recentActivity.length === 0) {
@@ -164,7 +509,6 @@ function loadRecentActivity() {
     });
 }
 
-
 /**
  * Loads and displays the full history based on current filters and page.
  */
@@ -174,7 +518,6 @@ function loadHistoryTab() {
         filterHistory();
     }
 }
-
 
 /**
  * Loads and displays the domain analytics.
@@ -196,11 +539,16 @@ function loadDomainsTab() {
         .sort(([, a], [, b]) => b - a);
 
     const domainsList = document.getElementById('domainsList');
+    if (!domainsList) return;
+    
     domainsList.innerHTML = ''; // Clear previous list
 
     // Update domain stats
-    document.getElementById('domainsTotal').textContent = sortedDomains.length;
-    document.getElementById('topDomain').textContent = sortedDomains.length > 0 ? sortedDomains[0][0] : 'N/A';
+    const domainsTotal = document.getElementById('domainsTotal');
+    const topDomain = document.getElementById('topDomain');
+    
+    if (domainsTotal) domainsTotal.textContent = sortedDomains.length;
+    if (topDomain) topDomain.textContent = sortedDomains.length > 0 ? sortedDomains[0][0] : 'N/A';
 
     if (sortedDomains.length === 0) {
         domainsList.innerHTML = '<div class="no-data-message">No domains found.</div>';
@@ -213,7 +561,6 @@ function loadDomainsTab() {
         domainsList.appendChild(domainItem);
     });
 }
-
 
 // --- UI ELEMENT CREATION ---
 
@@ -266,14 +613,6 @@ function createDomainItem(domain, count) {
     const itemEl = document.createElement('div');
     itemEl.className = 'domain-list-item';
     
-    // itemEl.innerHTML = `
-    //   <div class="domain-info">
-    //     <img src="https://www.google.com/s2/favicons?domain=${domain}" class="domain-favicon" alt="favicon">
-    //     <span class="domain-name">${domain}</span>
-    //   </div>
-    //   <span class="domain-count">${count}</span>
-    // `;
-
     itemEl.innerHTML = `
       <div class="card">
             <div class="card-content">
@@ -294,14 +633,16 @@ function createDomainItem(domain, count) {
     itemEl.addEventListener('click', () => {
         document.querySelector('[data-tab="history"]').click();
         setTimeout(() => {
-            document.getElementById('searchInput').value = domain;
-            filterHistory();
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) {
+                searchInput.value = domain;
+                filterHistory();
+            }
         }, 100); // Timeout to allow tab switch animation
     });
 
     return itemEl;
 }
-
 
 // --- HISTORY FILTERING & PAGINATION ---
 
@@ -309,8 +650,11 @@ function createDomainItem(domain, count) {
  * Filters the history based on search and time dropdown.
  */
 function filterHistory() {
-    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-    const filterType = document.getElementById('timeFilter').value;
+    const searchInput = document.getElementById('searchInput');
+    const timeFilter = document.getElementById('timeFilter');
+    
+    const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+    const filterType = timeFilter ? timeFilter.value : 'all';
 
     let filtered = [...allHistory];
 
@@ -350,12 +694,13 @@ function filterHistory() {
     updateHistoryStats();
 }
 
-
 /**
  * Displays the current page of the filtered history.
  */
 function displayHistoryPage() {
     const historyList = document.getElementById('historyList');
+    if (!historyList) return;
+    
     historyList.innerHTML = '';
 
     if (filteredHistory.length === 0) {
@@ -380,20 +725,27 @@ function displayHistoryPage() {
  * Updates the history stats text (e.g., "150 URLs found").
  */
 function updateHistoryStats() {
-    const count = filteredHistory.length;
-    document.getElementById('historyCount').textContent = `${count} URL${count === 1 ? '' : 's'} found`;
+    const historyCount = document.getElementById('historyCount');
+    if (historyCount) {
+        const count = filteredHistory.length;
+        historyCount.textContent = `${count} URL${count === 1 ? '' : 's'} found`;
+    }
 }
-
 
 /**
  * Updates pagination controls (buttons, page info text).
  */
 function updatePagination() {
     const totalPages = Math.ceil(filteredHistory.length / itemsPerPage);
-    document.getElementById('prevPage').disabled = currentPage === 1;
-    document.getElementById('nextPage').disabled = currentPage === totalPages || totalPages === 0;
-    document.getElementById('pageInfo').textContent = `Page ${currentPage} of ${totalPages || 1}`;
-    document.getElementById('pagination').style.display = totalPages > 1 ? 'flex' : 'none';
+    const prevPage = document.getElementById('prevPage');
+    const nextPage = document.getElementById('nextPage');
+    const pageInfo = document.getElementById('pageInfo');
+    const pagination = document.getElementById('pagination');
+    
+    if (prevPage) prevPage.disabled = currentPage === 1;
+    if (nextPage) nextPage.disabled = currentPage === totalPages || totalPages === 0;
+    if (pageInfo) pageInfo.textContent = `Page ${currentPage} of ${totalPages || 1}`;
+    if (pagination) pagination.style.display = totalPages > 1 ? 'flex' : 'none';
 }
 
 /**
@@ -409,7 +761,6 @@ function changePage(direction) {
         displayHistoryPage();
     }
 }
-
 
 // --- ACTIONS & UTILITIES ---
 
@@ -450,31 +801,34 @@ function exportUrls() {
     showToast('Data exported.', 'success');
 }
 
-
 /**
  * Checks connection to a backend server (example).
  */
 function testConnectionStatus() {
     const indicator = document.getElementById('statusIndicator');
+    if (!indicator) return;
+    
     const dot = indicator.querySelector('.status-dot');
     const text = indicator.querySelector('span');
     
-    dot.style.backgroundColor = '#f1c40f'; // Yellow for checking
-    text.textContent = 'Checking...';
+    if (dot && text) {
+        dot.style.backgroundColor = '#f1c40f'; // Yellow for checking
+        text.textContent = 'Checking...';
 
-    fetch('http://localhost:8000/ping')
-        .then(response => {
-            if (!response.ok) throw new Error('Not connected');
-            return response.json();
-        })
-        .then(data => {
-            dot.style.backgroundColor = '#2ecc71'; // Green for connected
-            text.textContent = 'Connected';
-        })
-        .catch(error => {
-            dot.style.backgroundColor = '#e74c3c'; // Red for disconnected
-            text.textContent = 'Offline';
-        });
+        fetch('http://localhost:8000/ping')
+            .then(response => {
+                if (!response.ok) throw new Error('Not connected');
+                return response.json();
+            })
+            .then(data => {
+                dot.style.backgroundColor = '#2ecc71'; // Green for connected
+                text.textContent = 'Connected';
+            })
+            .catch(error => {
+                dot.style.backgroundColor = '#e74c3c'; // Red for disconnected
+                text.textContent = 'Offline';
+            });
+    }
 }
 
 /**
@@ -509,6 +863,14 @@ function formatTimeAgo(timestamp) {
     return Math.floor(seconds) + " seconds ago";
 }
 
+/**
+ * Format date string for display
+ */
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString();
+}
+
 // --- SETTINGS ---
 
 /**
@@ -539,7 +901,6 @@ function saveSettings() {
     showToast('Settings saved!', 'success');
 }
 
-
 // --- NOTIFICATIONS ---
 
 /**
@@ -549,514 +910,55 @@ function saveSettings() {
  */
 function showToast(message, type = 'info') {
     const container = document.getElementById('toastContainer');
+    if (!container) {
+        // Create toast container if it doesn't exist
+        const toastContainer = document.createElement('div');
+        toastContainer.id = 'toastContainer';
+        toastContainer.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            pointer-events: none;
+        `;
+        document.body.appendChild(toastContainer);
+    }
+    
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.textContent = message;
-    container.appendChild(toast);
+    toast.style.cssText = `
+        background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : type === 'warning' ? '#ff9800' : '#2196F3'};
+        color: white;
+        padding: 12px 24px;
+        margin-bottom: 10px;
+        border-radius: 4px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        opacity: 0;
+        transform: translateX(100%);
+        transition: all 0.3s ease;
+        pointer-events: auto;
+        max-width: 300px;
+        word-wrap: break-word;
+    `;
+    
+    const actualContainer = document.getElementById('toastContainer');
+    actualContainer.appendChild(toast);
+    
+    // Trigger animation
     setTimeout(() => {
-        toast.classList.add('show');
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateX(0)';
     }, 10);
+    
+    // Remove toast after delay
     setTimeout(() => {
-        toast.classList.remove('show');
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(100%)';
         setTimeout(() => {
-            container.removeChild(toast);
-        }, 500);
-    }, 3000);
-}
-
-// ---- Blocking Functions ----
-
-
-
-// DOM elements
-const addDomainBtn = document.getElementById('addDomainBtn');
-const importBlocklistBtn = document.getElementById('importBlocklistBtn');
-const domainInput = document.getElementById('domainInput');
-const addDomainSubmit = document.getElementById('addDomainSubmit');
-const blockedDomainsList = document.getElementById('blockedDomainsList');
-const blockedCount = document.getElementById('blockedCount');
-const blocksToday = document.getElementById('blocksToday');
-const toggleAllBlocking = document.getElementById('toggleAllBlocking');
-const domainSuggestions = document.getElementById('domainSuggestions');
-
-// State
-let blockedDomains = [];
-let blockStats = {
-    totalBlocksToday: 0,
-    lastReset: new Date().toDateString()
-};
-
-// Initialize
-document.addEventListener('DOMContentLoaded', init);
-
-async function init() {
-    // Load saved data
-    await loadBlockedDomains();
-    await loadBlockStats();
-    
-    // Update UI
-    updateBlockedDomainsList();
-    updateStats();
-    
-    // Set up event listeners
-    setupEventListeners();
-    
-    // Start web request listener for actual blocking
-    setupWebRequestListener();
-}
-
-function setupEventListeners() {
-    // Add domain button
-    addDomainBtn.addEventListener('click', () => {
-        domainInput.focus();
-    });
-    
-    // Import blocklist button
-    importBlocklistBtn.addEventListener('click', importBlocklist);
-    
-    // Add domain form submission
-    addDomainSubmit.addEventListener('click', addDomain);
-    domainInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') addDomain();
-    });
-    
-    // Toggle all blocking
-    toggleAllBlocking.addEventListener('click', toggleAllDomains);
-    
-    // Load domain suggestions
-    loadDomainSuggestions();
-}
-
-// Blocking functionality
-// Updated webRequest listener
-function setupWebRequestListener() {
-    if (!chrome.webRequest?.onBeforeRequest) {
-        console.error("webRequest API not available");
-        return;
-    }
-
-    // Remove existing listener if any to avoid duplicates
-    chrome.webRequest.onBeforeRequest.removeListener(handleWebRequest);
-    
-    // Add new listener
-    chrome.webRequest.onBeforeRequest.addListener(
-        handleWebRequest,
-        { urls: ["<all_urls>"] },
-        ["blocking"]
-    );
-}
-
-// Separate handler function for better organization
-function handleWebRequest(details) {
-    try {
-        let url;
-        try {
-            url = new URL(details.url);
-        } catch (e) {
-            // Invalid URL, allow it
-            return { cancel: false };
-        }
-
-        const domain = url.hostname;
-        
-        // Check if domain is blocked and enabled
-        const isBlocked = blockedDomains.some(d => 
-            d.enabled && isDomainMatch(domain, d.domain)
-        );
-
-        if (isBlocked) {
-            // Update stats
-            blockStats.totalBlocksToday++;
-            updateStats();
-            saveBlockStats();
-            
-            // Show block notification
-            showBlockNotification(domain);
-            
-            return { cancel: true };
-        }
-        
-        return { cancel: false };
-    } catch (error) {
-        console.error("Error in request handler:", error);
-        return { cancel: false };
-    }
-}
-
-// Improved domain matching
-function isDomainMatch(requestDomain, blockedDomain) {
-    // Normalize domains to lowercase
-    requestDomain = requestDomain.toLowerCase();
-    blockedDomain = blockedDomain.toLowerCase();
-    
-    // Exact match
-    if (requestDomain === blockedDomain) return true;
-    
-    // Subdomain match (e.g., www.example.com matches example.com)
-    if (requestDomain.endsWith('.' + blockedDomain)) return true;
-    
-    // Special case for domains starting with www.
-    if (blockedDomain.startsWith('www.')) {
-        const withoutWww = blockedDomain.substring(4);
-        return requestDomain === withoutWww || requestDomain.endsWith('.' + withoutWww);
-    }
-    
-    return false;
-}
-
-// Update initialization
-async function init() {
-    // Load saved data
-    await loadBlockedDomains();
-    await loadBlockStats();
-    
-    // Update UI
-    updateBlockedDomainsList();
-    updateStats();
-    
-    // Set up event listeners
-    setupEventListeners();
-    
-    // Start web request listener for actual blocking
-    setupWebRequestListener();
-    
-    // Check if we have permission
-    checkPermissions();
-}
-
-// Permission check
-async function checkPermissions() {
-    if (!chrome.permissions?.contains) return;
-    
-    const requiredPermissions = {
-        origins: ["<all_urls>"],
-        permissions: ["webRequest", "webRequestBlocking"]
-    };
-    
-    const hasPermissions = await chrome.permissions.contains(requiredPermissions);
-    if (!hasPermissions) {
-        console.warn("Missing required permissions for blocking");
-        showError("Extension needs additional permissions to block websites");
-    }
-}
-
-function showBlockNotification(domain) {
-    if (!chrome.notifications) return;
-    
-    chrome.notifications.create({
-        type: 'basic',
-        iconUrl: 'icons/icon48.png',
-        title: 'Domain Blocked',
-        message: `Access to ${domain} has been blocked`
-    });
-}
-
-// Domain management
-async function loadBlockedDomains() {
-    const result = await chrome.storage.sync.get('blockedDomains');
-    blockedDomains = result.blockedDomains || [];
-}
-
-async function saveBlockedDomains() {
-    await chrome.storage.sync.set({ blockedDomains });
-    updateBlockedCount();
-}
-
-async function loadBlockStats() {
-    const result = await chrome.storage.local.get('blockStats');
-    if (result.blockStats) {
-        // Reset stats if it's a new day
-        if (result.blockStats.lastReset !== new Date().toDateString()) {
-            blockStats = {
-                totalBlocksToday: 0,
-                lastReset: new Date().toDateString()
-            };
-        } else {
-            blockStats = result.blockStats;
-        }
-    }
-}
-
-async function saveBlockStats() {
-    await chrome.storage.local.set({ blockStats });
-}
-
-function addDomain() {
-    let domain = domainInput.value.trim();
-    
-    if (!domain) return;
-    
-    // Remove protocol if present
-    domain = domain.replace(/^https?:\/\//, '');
-    
-    // Remove path if present
-    domain = domain.split('/')[0];
-    
-    // Remove www. if present for consistency
-    domain = domain.replace(/^www\./, '');
-    
-    // Validate domain
-    if (!isValidDomain(domain)) {
-        showError("Please enter a valid domain (e.g., example.com)");
-        return;
-    }
-    
-    // Check if domain already exists
-    if (blockedDomains.some(d => d.domain === domain)) {
-        showError("This domain is already blocked");
-        return;
-    }
-    
-    // Add new domain
-    blockedDomains.unshift({
-        domain,
-        enabled: true,
-        dateAdded: new Date().toISOString()
-    });
-    
-    // Save and update UI
-    saveBlockedDomains();
-    updateBlockedDomainsList();
-    
-    // Clear input
-    domainInput.value = '';
-    
-    // Show success
-    showSuccess(`${domain} has been blocked`);
-}
-
-function isValidDomain(domain) {
-    // Simple domain validation
-    return /^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$/i.test(domain);
-}
-
-function updateBlockedDomainsList() {
-    blockedDomainsList.innerHTML = '';
-    
-    if (blockedDomains.length === 0) {
-        blockedDomainsList.innerHTML = `
-            <div class="empty-state">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                <p>No domains blocked yet</p>
-            </div>
-        `;
-        return;
-    }
-    
-    blockedDomains.forEach((domainObj, index) => {
-        const domainElement = document.createElement('div');
-        domainElement.className = 'blocked-domain-item';
-        domainElement.innerHTML = `
-            <div class="domain-info">
-                <label class="toggle-switch">
-                    <input type="checkbox" ${domainObj.enabled ? 'checked' : ''} data-index="${index}">
-                    <span class="slider"></span>
-                </label>
-                <span class="domain-name">${domainObj.domain}</span>
-                <span class="domain-date">${formatDate(domainObj.dateAdded)}</span>
-            </div>
-            <div class="domain-actions">
-                <button class="icon-button edit-domain" data-index="${index}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                    </svg>
-                </button>
-                <button class="icon-button delete-domain" data-index="${index}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path d="M3 6h18"/>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                </button>
-            </div>
-        `;
-        
-        blockedDomainsList.appendChild(domainElement);
-    });
-    
-    // Add event listeners to new elements
-    document.querySelectorAll('.toggle-switch input').forEach(checkbox => {
-        checkbox.addEventListener('change', toggleDomain);
-    });
-    
-    document.querySelectorAll('.edit-domain').forEach(button => {
-        button.addEventListener('click', editDomain);
-    });
-    
-    document.querySelectorAll('.delete-domain').forEach(button => {
-        button.addEventListener('click', deleteDomain);
-    });
-}
-
-function toggleDomain(e) {
-    const index = e.target.dataset.index;
-    blockedDomains[index].enabled = e.target.checked;
-    saveBlockedDomains();
-    
-    const action = e.target.checked ? 'enabled' : 'disabled';
-    showSuccess(`${blockedDomains[index].domain} has been ${action}`);
-}
-
-function editDomain(e) {
-    const index = e.target.closest('button').dataset.index;
-    const domainObj = blockedDomains[index];
-    
-    const newDomain = prompt("Edit domain:", domainObj.domain);
-    if (newDomain && newDomain !== domainObj.domain) {
-        if (!isValidDomain(newDomain)) {
-            showError("Please enter a valid domain");
-            return;
-        }
-        
-        if (blockedDomains.some(d => d.domain === newDomain && d !== domainObj)) {
-            showError("This domain is already blocked");
-            return;
-        }
-        
-        domainObj.domain = newDomain;
-        saveBlockedDomains();
-        updateBlockedDomainsList();
-        showSuccess("Domain updated successfully");
-    }
-}
-
-function deleteDomain(e) {
-    const index = e.target.closest('button').dataset.index;
-    const domain = blockedDomains[index].domain;
-    
-    if (confirm(`Are you sure you want to unblock ${domain}?`)) {
-        blockedDomains.splice(index, 1);
-        saveBlockedDomains();
-        updateBlockedDomainsList();
-        showSuccess(`${domain} has been unblocked`);
-    }
-}
-
-function toggleAllDomains() {
-    const currentlyEnabled = blockedDomains.every(d => d.enabled);
-    const newState = !currentlyEnabled;
-    
-    blockedDomains.forEach(d => d.enabled = newState);
-    saveBlockedDomains();
-    updateBlockedDomainsList();
-    
-    toggleAllBlocking.querySelector('span').textContent = 
-        newState ? 'Disable All' : 'Enable All';
-    
-    showSuccess(`All domains have been ${newState ? 'enabled' : 'disabled'}`);
-}
-
-// Stats and UI
-function updateStats() {
-    blockedCount.textContent = blockedDomains.length;
-    blocksToday.textContent = blockStats.totalBlocksToday;
-}
-
-function updateBlockedCount() {
-    blockedCount.textContent = blockedDomains.length;
-}
-
-function formatDate(dateString) {
-    const date = new Date(dateString);
-    return date.toLocaleDateString();
-}
-
-function showError(message) {
-    const notification = document.createElement('div');
-    notification.className = 'notification error';
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.remove();
-    }, 3000);
-}
-
-function showSuccess(message) {
-    const notification = document.createElement('div');
-    notification.className = 'notification success';
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.remove();
-    }, 3000);
-}
-
-// Import/Export
-async function importBlocklist() {
-    try {
-        const fileHandles = await window.showOpenFilePicker({
-            types: [{
-                description: 'Text Files',
-                accept: { 'text/plain': ['.txt'] }
-            }],
-            multiple: false
-        });
-        
-        const file = await fileHandles[0].getFile();
-        const content = await file.text();
-        
-        const domains = content.split('\n')
-            .map(line => line.trim())
-            .filter(line => line && !line.startsWith('#') && !line.startsWith('//'))
-            .map(line => line.replace(/^https?:\/\//, '').split('/')[0]);
-        
-        let addedCount = 0;
-        
-        for (const domain of domains) {
-            if (!isValidDomain(domain)) continue;
-            
-            if (!blockedDomains.some(d => d.domain === domain)) {
-                blockedDomains.push({
-                    domain,
-                    enabled: true,
-                    dateAdded: new Date().toISOString()
-                });
-                addedCount++;
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
             }
-        }
-        
-        if (addedCount > 0) {
-            saveBlockedDomains();
-            updateBlockedDomainsList();
-            showSuccess(`Imported ${addedCount} new domains`);
-        } else {
-            showError("No new domains to import");
-        }
-    } catch (err) {
-        if (err.name !== 'AbortError') {
-            showError("Failed to import blocklist");
-        }
-    }
-}
-
-// Domain suggestions
-async function loadDomainSuggestions() {
-    // In a real extension, you might get these from browsing history
-    const suggestions = [
-        'facebook.com',
-        'twitter.com',
-        'youtube.com',
-        'reddit.com',
-        'instagram.com'
-    ];
-    
-    domainSuggestions.innerHTML = '';
-    
-    suggestions.forEach(domain => {
-        const pill = document.createElement('span');
-        pill.className = 'domain-pill';
-        pill.textContent = domain;
-        pill.addEventListener('click', () => {
-            domainInput.value = domain;
-            domainInput.focus();
-        });
-        
-        domainSuggestions.appendChild(pill);
-    });
+        }, 300);
+    }, 3000);
 }

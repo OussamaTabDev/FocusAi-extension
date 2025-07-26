@@ -1,375 +1,360 @@
-// Listen for messages from popup or Python
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'closeTabsByDomain') {
-    const targetDomain = request.domain.toLowerCase().replace(/^www\./, '');
-    closeTabsByDomain(targetDomain, sendResponse);
-    return true;
-  }
+// background.js - Manifest V3 Service Worker Compatible
 
-  if (request.action === 'closeDistractingTabs') {
-    const distractingDomains = request.domains || [];
-    const normalizedDomains = distractingDomains.map(d => d.toLowerCase().replace(/^www\./, ''));
-    closeTabsByDomains(normalizedDomains, sendResponse);
-    return true;
-  }
-
-  if (request.action === 'getAllTabs') {
-    chrome.tabs.query({}, (tabs) => {
-      const tabInfo = tabs.map(tab => ({
-        id: tab.id,
-        url: tab.url,
-        title: tab.title,
-        domain: tab.url ? new URL(tab.url).hostname.toLowerCase().replace(/^www\./, '') : 'unknown'
-      }));
-      sendResponse({ success: true, tabs: tabInfo });
-    });
-    return true;
-  }
-});
-
-// Optimized version - query tabs by URL pattern directly
-function closeTabsByDomain(targetDomain, sendResponse) {
-  console.log(`Looking for tabs with domain: ${targetDomain}`);
-  
-  // Use URL pattern matching to reduce the number of tabs we need to check
-  const urlPatterns = [
-    `*://${targetDomain}/*`,
-    `*://www.${targetDomain}/*`
-  ];
-  
-  let closedCount = 0;
-  let completedQueries = 0;
-  
-  urlPatterns.forEach(pattern => {
-    chrome.tabs.query({ url: pattern }, (tabs) => {
-      completedQueries++;
-      
-      if (tabs.length > 0) {
-        const tabIds = tabs.map(tab => tab.id);
-        closedCount += tabs.length;
-        
-        // Close tabs immediately without waiting
-        chrome.tabs.remove(tabIds);
-      }
-      
-      // Send response only after all patterns are checked
-      if (completedQueries === urlPatterns.length) {
-        if (sendResponse) {
-          sendResponse({ 
-            success: true, 
-            closed: closedCount,
-            message: closedCount > 0 ? `Closed ${closedCount} tabs` : 'No matching tabs found'
-          });
-        }
-      }
-    });
-  });
-}
-
-// Batch processing for multiple domains
-function closeTabsByDomains(domains, sendResponse) {
-  if (!domains || domains.length === 0) {
-    if (sendResponse) sendResponse({ success: true, closed: 0 });
-    return;
-  }
-  
-  // Create URL patterns for all domains at once
-  const urlPatterns = domains.flatMap(domain => [
-    `*://${domain}/*`,
-    `*://www.${domain}/*`
-  ]);
-  
-  let closedCount = 0;
-  let completedQueries = 0;
-  const totalQueries = urlPatterns.length;
-  
-  urlPatterns.forEach(pattern => {
-    chrome.tabs.query({ url: pattern }, (tabs) => {
-      completedQueries++;
-      
-      if (tabs.length > 0) {
-        const tabIds = tabs.map(tab => tab.id);
-        closedCount += tabs.length;
-        chrome.tabs.remove(tabIds); // Fire and forget
-      }
-      
-      if (completedQueries === totalQueries) {
-        if (sendResponse) {
-          sendResponse({ success: true, closed: closedCount });
-        }
-      }
-    });
-  });
-}
-
-// Poll for commands from Python server
-function pollForCommands() {
-  fetch('http://localhost:8000/get-commands')
-    .then(response => response.json())
-    .then(data => {
-      if (data.commands && data.commands.length > 0) {
-        console.log('Received commands:', data.commands);
-        
-        // Process each command
-        data.commands.forEach(command => {
-          processCommand(command);
-        });
-        
-        // Clear processed commands
-        fetch('http://localhost:8000/clear-commands', { method: 'POST' })
-          .catch(error => console.error('Error clearing commands:', error));
-      }
-    })
-    .catch(error => {
-      // Server might not be running, that's okay
-      console.log('Could not fetch commands (server might be offline)');
-    });
-}
-
-// Process individual command
-function processCommand(command) {
-  console.log('Processing command:', command);
-  
-  switch (command.action) {
-    case 'closeTabsByDomain':
-      closeTabsByDomain(command.domain);
-      break;
-    case 'closeDistractingTabs':
-      closeTabsByDomains(command.domains || []);
-      break;
-    default:
-      console.warn('Unknown command action:', command.action);
-  }
-}
-
-// Start polling when extension loads
-console.log('Starting command polling...');
-setInterval(pollForCommands, 1000); // Poll every second
-
-// Also poll immediately on startup
-setTimeout(pollForCommands, 1000);
-
-// Background script to track URL changes
-let lastUrl = '';
-
-// Listen for tab updates (navigation events)
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url && tab.url !== lastUrl) {
-    lastUrl = tab.url;
-    trackUrl(tab.url, tab.title);
-  }
-});
-
-// Listen for tab activation (switching between tabs)
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  chrome.tabs.get(activeInfo.tabId, (tab) => {
-    if (tab.url && tab.url !== lastUrl) {
-      lastUrl = tab.url;
-      trackUrl(tab.url, tab.title);
-    }
-  });
-});
-
-// Function to track URL
-function trackUrl(url, title) {
-  const timestamp = new Date().toISOString();
-  const urlData = {
-    url: url,
-    title: title || 'Unknown',
-    timestamp: timestamp
-  };
-  
-  // Store in local storage
-  storeUrlData(urlData);
-  
-  // Send to Python script
-  sendToPython(urlData);
-  
-  console.log('Tracked URL:', urlData);
-}
-
-// Store URL data locally
-function storeUrlData(urlData) {
-  chrome.storage.local.get(['urlHistory'], (result) => {
-    const history = result.urlHistory || [];
-    history.push(urlData);
-    
-    // Keep only last 1000 URLs to prevent storage overflow
-    if (history.length > 1000) {
-      history.shift();
-    }
-    
-    chrome.storage.local.set({ urlHistory: history });
-  });
-}
-
-// Send data to Python script via HTTP
-function sendToPython(urlData) {
-  fetch('http://localhost:8000/track-url', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(urlData)
-  })
-  .then(response => {
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-    return response.json();
-  })
-  .then(data => {
-    console.log('Successfully sent to Python:', data);
-  })
-  .catch(error => {
-    console.error('Error sending to Python:', error);
-  });
-}
-
-
-// background.js - Service Worker for blocking functionality
-
+// --- GLOBAL STATE ---
 let blockedDomains = [];
+let isInitialized = false;
 
-// Initialize when extension starts
-chrome.runtime.onStartup.addListener(initializeBlocking);
-chrome.runtime.onInstalled.addListener(initializeBlocking);
+// --- INITIALIZATION ---
+// Service workers can be terminated, so we need to handle reinitialization
+chrome.runtime.onStartup.addListener(initialize);
+chrome.runtime.onInstalled.addListener(initialize);
 
-async function initializeBlocking() {
-    // Load blocked domains from storage
-    const result = await chrome.storage.sync.get(['blockedDomains']);
-    blockedDomains = result.blockedDomains || [];
-    
-    // Set up blocking rules
-    updateBlockingRules();
+// Also initialize when the service worker starts
+if (!isInitialized) {
+    initialize();
 }
 
-// Listen for messages from popup
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'updateBlockingRules') {
-        blockedDomains = request.domains || [];
-        updateBlockingRules();
-        sendResponse({ success: true });
-    }
-});
-
-// Method 1: Using chrome.webRequest (Manifest V2 or V3 with special permissions)
-function updateBlockingRules() {
-    // Remove existing listener
-    if (chrome.webRequest.onBeforeRequest.hasListener(blockRequestHandler)) {
-        chrome.webRequest.onBeforeRequest.removeListener(blockRequestHandler);
-    }
-    
-    // Add new listener if we have domains to block
-    if (blockedDomains.some(d => d.enabled)) {
-        chrome.webRequest.onBeforeRequest.addListener(
-            blockRequestHandler,
-            { urls: ["<all_urls>"] },
-            ["blocking"]
-        );
-    }
-}
-
-function blockRequestHandler(details) {
+async function initialize() {
     try {
-        const url = new URL(details.url);
-        const domain = url.hostname.replace(/^www\./, '');
+        console.log('Initializing extension...');
         
-        // Check if this domain should be blocked
-        const shouldBlock = blockedDomains.some(d => 
-            d.enabled && isDomainMatch(domain, d.domain)
-        );
+        // Load blocked domains
+        await loadBlockedDomains();
         
-        if (shouldBlock) {
-            console.log(`Blocked request to: ${domain}`);
-            
-            // Update block statistics
-            updateBlockStats();
-            
-            // Show notification (optional)
-            if (chrome.notifications) {
-                chrome.notifications.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon48.png',
-                    title: 'Domain Blocked',
-                    message: `Access to ${domain} has been blocked`
-                });
-            }
-            
-            return { cancel: true };
-        }
+        // Set up blocking rules
+        await updateBlockingRules();
         
-        return { cancel: false };
+        // Start command polling
+        startCommandPolling();
+        
+        isInitialized = true;
+        console.log('Extension initialized successfully');
     } catch (error) {
-        console.error('Error in block handler:', error);
-        return { cancel: false };
+        console.error('Failed to initialize extension:', error);
     }
 }
 
-function isDomainMatch(requestDomain, blockedDomain) {
-    requestDomain = requestDomain.toLowerCase();
-    blockedDomain = blockedDomain.toLowerCase();
-    
-    // Exact match
-    if (requestDomain === blockedDomain) return true;
-    
-    // Subdomain match
-    if (requestDomain.endsWith('.' + blockedDomain)) return true;
-    
-    return false;
-}
-
-async function updateBlockStats() {
-    const today = new Date().toDateString();
-    const result = await chrome.storage.local.get(['blockStats']);
-    let blockStats = result.blockStats || { totalBlocksToday: 0, lastReset: today };
-    
-    // Reset if new day
-    if (blockStats.lastReset !== today) {
-        blockStats = { totalBlocksToday: 0, lastReset: today };
+// --- BLOCKING FUNCTIONALITY ---
+async function loadBlockedDomains() {
+    try {
+        const result = await chrome.storage.sync.get(['blockedDomains']);
+        blockedDomains = result.blockedDomains || [];
+        console.log('Loaded blocked domains:', blockedDomains.length);
+    } catch (error) {
+        console.error('Error loading blocked domains:', error);
+        blockedDomains = [];
     }
-    
-    blockStats.totalBlocksToday++;
-    await chrome.storage.local.set({ blockStats });
 }
 
-// Method 2: Alternative using Declarative Net Request (Manifest V3 preferred)
-// Uncomment this section if you prefer using declarativeNetRequest
+async function updateBlockingRules() {
+    try {
+        if (!chrome.declarativeNetRequest) {
+            console.warn('declarativeNetRequest API not available');
+            return;
+        }
 
-/*
-async function updateBlockingRulesDeclarative() {
-    // Clear existing rules
-    await chrome.declarativeNetRequest.updateDynamicRules({
-        removeRuleIds: await getAllRuleIds()
-    });
-    
-    // Add new rules for enabled domains
-    const rules = [];
-    let ruleId = 1;
-    
-    blockedDomains.forEach(domainObj => {
-        if (domainObj.enabled) {
-            rules.push({
+        // Get current dynamic rules
+        const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
+        const ruleIdsToRemove = existingRules.map(rule => rule.id);
+
+        // Create new rules for enabled domains
+        const newRules = [];
+        let ruleId = 1;
+
+        const enabledDomains = blockedDomains.filter(domain => domain.enabled);
+        
+        for (const domainObj of enabledDomains) {
+            // Rule for main domain
+            newRules.push({
                 id: ruleId++,
                 priority: 1,
-                action: { type: "block" },
+                action: { type: 'block' },
                 condition: {
                     urlFilter: `*://*.${domainObj.domain}/*`,
-                    resourceTypes: ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"]
+                    resourceTypes: ['main_frame']
+                }
+            });
+
+            // Rule for exact domain (without subdomain)
+            newRules.push({
+                id: ruleId++,
+                priority: 1,
+                action: { type: 'block' },
+                condition: {
+                    urlFilter: `*://${domainObj.domain}/*`,
+                    resourceTypes: ['main_frame']
                 }
             });
         }
-    });
-    
-    if (rules.length > 0) {
+
+        // Update rules
         await chrome.declarativeNetRequest.updateDynamicRules({
-            addRules: rules
+            removeRuleIds: ruleIdsToRemove,
+            addRules: newRules
         });
+
+        console.log(`Updated blocking rules: ${newRules.length} rules for ${enabledDomains.length} domains`);
+        
+    } catch (error) {
+        console.error('Error updating blocking rules:', error);
     }
 }
 
-async function getAllRuleIds() {
-    const rules = await chrome.declarativeNetRequest.getDynamicRules();
-    return rules.map(rule => rule.id);
+// --- URL TRACKING ---
+let lastTrackedUrl = '';
+
+// Track URL changes
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' && tab.url && tab.url !== lastTrackedUrl) {
+        lastTrackedUrl = tab.url;
+        trackUrl(tab.url, tab.title);
+    }
+});
+
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        if (tab.url && tab.url !== lastTrackedUrl) {
+            lastTrackedUrl = tab.url;
+            trackUrl(tab.url, tab.title);
+        }
+    } catch (error) {
+        console.error('Error tracking activated tab:', error);
+    }
+});
+
+function trackUrl(url, title) {
+    const urlData = {
+        url: url,
+        title: title || 'Unknown',
+        timestamp: new Date().toISOString()
+    };
+    
+    // Store locally
+    storeUrlData(urlData);
+    
+    // Send to Python server
+    sendToPython(urlData);
+    
+    console.log('Tracked URL:', urlData.url);
 }
-*/
+
+async function storeUrlData(urlData) {
+    try {
+        const result = await chrome.storage.local.get(['urlHistory']);
+        const history = result.urlHistory || [];
+        
+        history.push(urlData);
+        
+        // Keep only last 1000 URLs
+        if (history.length > 1000) {
+            history.splice(0, history.length - 1000);
+        }
+        
+        await chrome.storage.local.set({ urlHistory: history });
+    } catch (error) {
+        console.error('Error storing URL data:', error);
+    }
+}
+
+// --- TAB MANAGEMENT ---
+async function closeTabsByDomain(targetDomain) {
+    try {
+        const urlPatterns = [
+            `*://${targetDomain}/*`,
+            `*://www.${targetDomain}/*`
+        ];
+        
+        let closedCount = 0;
+        
+        for (const pattern of urlPatterns) {
+            const tabs = await chrome.tabs.query({ url: pattern });
+            if (tabs.length > 0) {
+                const tabIds = tabs.map(tab => tab.id);
+                await chrome.tabs.remove(tabIds);
+                closedCount += tabs.length;
+            }
+        }
+        
+        console.log(`Closed ${closedCount} tabs for domain: ${targetDomain}`);
+        return { success: true, closed: closedCount };
+    } catch (error) {
+        console.error('Error closing tabs:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+async function closeTabsByDomains(domains) {
+    try {
+        if (!domains || domains.length === 0) {
+            return { success: true, closed: 0 };
+        }
+        
+        let totalClosed = 0;
+        
+        for (const domain of domains) {
+            const result = await closeTabsByDomain(domain);
+            if (result.success) {
+                totalClosed += result.closed;
+            }
+        }
+        
+        return { success: true, closed: totalClosed };
+    } catch (error) {
+        console.error('Error closing multiple domain tabs:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// --- PYTHON INTEGRATION ---
+let commandPollingInterval;
+
+function startCommandPolling() {
+    // Clear existing interval if any
+    if (commandPollingInterval) {
+        clearInterval(commandPollingInterval);
+    }
+    
+    // Start polling every 2 seconds (reduced frequency for service workers)
+    commandPollingInterval = setInterval(pollForCommands, 2000);
+    
+    // Also poll immediately
+    setTimeout(pollForCommands, 1000);
+}
+
+async function pollForCommands() {
+    try {
+        const response = await fetch('http://localhost:8000/get-commands');
+        const data = await response.json();
+        
+        if (data.commands && data.commands.length > 0) {
+            console.log('Received commands:', data.commands);
+            
+            // Process each command
+            for (const command of data.commands) {
+                await processCommand(command);
+            }
+            
+            // Clear processed commands
+            await fetch('http://localhost:8000/clear-commands', { method: 'POST' });
+        }
+    } catch (error) {
+        // Server might not be running, that's okay
+        console.log('Could not fetch commands (server offline)');
+    }
+}
+
+async function processCommand(command) {
+    console.log('Processing command:', command);
+    
+    try {
+        switch (command.action) {
+            case 'closeTabsByDomain':
+                await closeTabsByDomain(command.domain);
+                break;
+            case 'closeDistractingTabs':
+                await closeTabsByDomains(command.domains || []);
+                break;
+            default:
+                console.warn('Unknown command action:', command.action);
+        }
+    } catch (error) {
+        console.error('Error processing command:', error);
+    }
+}
+
+async function sendToPython(urlData) {
+    try {
+        const response = await fetch('http://localhost:8000/track-url', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(urlData)
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Successfully sent to Python');
+        }
+    } catch (error) {
+        // Silently fail if Python server is not running
+        console.log('Python server not available');
+    }
+}
+
+// --- MESSAGE HANDLING ---
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    // Handle async operations properly
+    (async () => {
+        try {
+            switch (request.action) {
+                case 'updateBlockingRules':
+                    blockedDomains = request.domains || [];
+                    await updateBlockingRules();
+                    await updateBlockStats();
+                    sendResponse({ success: true });
+                    break;
+                    
+                case 'closeTabsByDomain':
+                    const targetDomain = request.domain.toLowerCase().replace(/^www\./, '');
+                    const result = await closeTabsByDomain(targetDomain);
+                    sendResponse(result);
+                    break;
+                    
+                case 'closeDistractingTabs':
+                    const normalizedDomains = (request.domains || [])
+                        .map(d => d.toLowerCase().replace(/^www\./, ''));
+                    const bulkResult = await closeTabsByDomains(normalizedDomains);
+                    sendResponse(bulkResult);
+                    break;
+                    
+                case 'getAllTabs':
+                    const tabs = await chrome.tabs.query({});
+                    const tabInfo = tabs.map(tab => ({
+                        id: tab.id,
+                        url: tab.url,
+                        title: tab.title,
+                        domain: tab.url ? new URL(tab.url).hostname.toLowerCase().replace(/^www\./, '') : 'unknown'
+                    }));
+                    sendResponse({ success: true, tabs: tabInfo });
+                    break;
+                    
+                default:
+                    sendResponse({ success: false, error: 'Unknown action' });
+            }
+        } catch (error) {
+            console.error('Error handling message:', error);
+            sendResponse({ success: false, error: error.message });
+        }
+    })();
+    
+    return true; // Keep message channel open for async response
+});
+
+// --- STATISTICS ---
+async function updateBlockStats() {
+    try {
+        const today = new Date().toDateString();
+        const result = await chrome.storage.local.get(['blockStats']);
+        let blockStats = result.blockStats || { totalBlocksToday: 0, lastReset: today };
+        
+        // Reset if new day
+        if (blockStats.lastReset !== today) {
+            blockStats = { totalBlocksToday: 1, lastReset: today };
+        } else {
+            blockStats.totalBlocksToday++;
+        }
+        
+        await chrome.storage.local.set({ blockStats });
+    } catch (error) {
+        console.error('Error updating block stats:', error);
+    }
+}
+
+// Keep service worker alive
+chrome.runtime.onConnect.addListener((port) => {
+    // This helps keep the service worker alive longer
+});
+
+console.log('Background service worker loaded');
