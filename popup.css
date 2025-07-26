@@ -1,9 +1,9 @@
 
 :root {
   /* Colors - HSL values for better manipulation */
-  --bg-primary: hsl(240, 10%, 3.9%);
-  --bg-secondary: hsl(240, 8%, 6%);
-  --bg-card: hsl(240, 10%, 4.5%);
+  --bg-primary: hsl(219, 100%, 5%);
+  --bg-secondary: hsl(219, 95%, 7%);
+  --bg-card: hsl(219, 100%, 5%);
   --bg-muted: hsl(240, 3.7%, 15.9%);
   
   --text-primary: hsl(0, 0%, 98%);
@@ -85,7 +85,7 @@ body {
   width: 420px;
   height: 600px;
   background: var(--bg-primary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -122,7 +122,7 @@ body {
 .logo-text {
   font-size: 1.25rem;
   font-weight: 700;
-  background: var(--gradient-primary);
+  background: var(--text-primary);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -237,7 +237,7 @@ body {
 .stat-card {
   background: var(--gradient-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: var(--space-4);
   transition: all var(--transition-normal);
 }
@@ -311,7 +311,7 @@ body {
 .section {
   background: var(--gradient-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -402,7 +402,7 @@ body {
 .action-button {
   background: var(--bg-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: var(--space-4);
   color: var(--text-secondary);
   cursor: pointer;
@@ -573,7 +573,7 @@ body {
 .history-list {
   background: var(--gradient-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   overflow: hidden;
   margin-bottom: var(--space-4);
 }
@@ -674,7 +674,7 @@ body {
 .domains-list {
   background: var(--gradient-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -732,7 +732,7 @@ body {
 .settings-section {
   background: var(--gradient-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -897,7 +897,7 @@ body {
 .toast {
   background: var(--gradient-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: var(--space-4);
   margin-bottom: var(--space-3);
   min-width: 280px;
@@ -1178,7 +1178,7 @@ body {
   border: none;
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
-  color: white;
+  color: rgb(0, 0, 0);
   cursor: pointer;
   transition: all var(--transition-normal);
   display: flex;
@@ -1187,6 +1187,7 @@ body {
   font-size: 0.875rem;
   font-weight: 500;
   white-space: nowrap;
+  
 }
 
 .add-button:hover {
@@ -1261,7 +1262,7 @@ body {
 .blocked-domains-list {
   background: var(--gradient-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 

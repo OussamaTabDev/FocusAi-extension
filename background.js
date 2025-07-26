@@ -27,72 +27,78 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Function to close tabs by domain
+// Optimized version - query tabs by URL pattern directly
 function closeTabsByDomain(targetDomain, sendResponse) {
   console.log(`Looking for tabs with domain: ${targetDomain}`);
   
-  chrome.tabs.query({}, (tabs) => {
-    const toClose = tabs.filter(tab => {
-      try {
-        const url = new URL(tab.url);
-        const tabDomain = url.hostname.toLowerCase().replace(/^www\./, '');
+  // Use URL pattern matching to reduce the number of tabs we need to check
+  const urlPatterns = [
+    `*://${targetDomain}/*`,
+    `*://www.${targetDomain}/*`
+  ];
+  
+  let closedCount = 0;
+  let completedQueries = 0;
+  
+  urlPatterns.forEach(pattern => {
+    chrome.tabs.query({ url: pattern }, (tabs) => {
+      completedQueries++;
+      
+      if (tabs.length > 0) {
+        const tabIds = tabs.map(tab => tab.id);
+        closedCount += tabs.length;
         
-        console.log(`Comparing: ${tabDomain} === ${targetDomain}`);
-        return tabDomain === targetDomain;
-      } catch (error) {
-        console.error('Error parsing URL:', tab.url, error);
-        return false;
+        // Close tabs immediately without waiting
+        chrome.tabs.remove(tabIds);
+      }
+      
+      // Send response only after all patterns are checked
+      if (completedQueries === urlPatterns.length) {
+        if (sendResponse) {
+          sendResponse({ 
+            success: true, 
+            closed: closedCount,
+            message: closedCount > 0 ? `Closed ${closedCount} tabs` : 'No matching tabs found'
+          });
+        }
       }
     });
-
-    console.log(`Found ${toClose.length} tabs to close for domain: ${targetDomain}`);
-    toClose.forEach(tab => console.log(`Will close: ${tab.url}`));
-
-    const tabIds = toClose.map(tab => tab.id);
-    
-    if (tabIds.length > 0) {
-      chrome.tabs.remove(tabIds, () => {
-        if (chrome.runtime.lastError) {
-          console.error('Error closing tabs:', chrome.runtime.lastError);
-          if (sendResponse) sendResponse({ success: false, error: chrome.runtime.lastError.message, closed: 0 });
-        } else {
-          console.log(`Successfully closed ${tabIds.length} tabs`);
-          if (sendResponse) sendResponse({ success: true, closed: tabIds.length });
-        }
-      });
-    } else {
-      console.log('No matching tabs found');
-      if (sendResponse) sendResponse({ success: true, closed: 0, message: 'No matching tabs found' });
-    }
   });
 }
 
-// Function to close tabs by multiple domains
+// Batch processing for multiple domains
 function closeTabsByDomains(domains, sendResponse) {
-  chrome.tabs.query({}, (tabs) => {
-    const toClose = tabs.filter(tab => {
-      try {
-        const url = new URL(tab.url);
-        const tabDomain = url.hostname.toLowerCase().replace(/^www\./, '');
-        return domains.includes(tabDomain);
-      } catch {
-        return false;
+  if (!domains || domains.length === 0) {
+    if (sendResponse) sendResponse({ success: true, closed: 0 });
+    return;
+  }
+  
+  // Create URL patterns for all domains at once
+  const urlPatterns = domains.flatMap(domain => [
+    `*://${domain}/*`,
+    `*://www.${domain}/*`
+  ]);
+  
+  let closedCount = 0;
+  let completedQueries = 0;
+  const totalQueries = urlPatterns.length;
+  
+  urlPatterns.forEach(pattern => {
+    chrome.tabs.query({ url: pattern }, (tabs) => {
+      completedQueries++;
+      
+      if (tabs.length > 0) {
+        const tabIds = tabs.map(tab => tab.id);
+        closedCount += tabs.length;
+        chrome.tabs.remove(tabIds); // Fire and forget
+      }
+      
+      if (completedQueries === totalQueries) {
+        if (sendResponse) {
+          sendResponse({ success: true, closed: closedCount });
+        }
       }
     });
-
-    const tabIds = toClose.map(tab => tab.id);
-    
-    if (tabIds.length > 0) {
-      chrome.tabs.remove(tabIds, () => {
-        if (chrome.runtime.lastError) {
-          if (sendResponse) sendResponse({ success: false, error: chrome.runtime.lastError.message });
-        } else {
-          if (sendResponse) sendResponse({ success: true, closed: tabIds.length });
-        }
-      });
-    } else {
-      if (sendResponse) sendResponse({ success: true, closed: 0 });
-    }
   });
 }
 
