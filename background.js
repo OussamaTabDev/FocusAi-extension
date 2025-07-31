@@ -224,7 +224,7 @@ function startCommandPolling() {
 
 async function pollForCommands() {
     try {
-        const response = await fetch('http://localhost:8000/get-commands');
+        const response = await fetch('http://localhost:5000/e-tracker/get-commands');
         const data = await response.json();
         
         if (data.commands && data.commands.length > 0) {
@@ -236,7 +236,7 @@ async function pollForCommands() {
             }
             
             // Clear processed commands
-            await fetch('http://localhost:8000/clear-commands', { method: 'POST' });
+            await fetch('http://localhost:5000/e-tracker/clear-commands', { method: 'POST' });
         }
     } catch (error) {
         // Server might not be running, that's okay
@@ -265,7 +265,7 @@ async function processCommand(command) {
 
 async function sendToPython(urlData) {
     try {
-        const response = await fetch('http://localhost:8000/track-url', {
+        const response = await fetch('http://localhost:5000/e-tracker/track-url', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

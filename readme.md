@@ -91,16 +91,16 @@ Each tracked URL includes:
 ### Example API Usage
 ```bash
 # Get statistics
-curl http://localhost:8000/stats
+curl http://localhost:5000/e-tracker/stats
 
 # Get all URLs
-curl http://localhost:8000/urls
+curl http://localhost:8000e-tracker/urls
 
 # Export as CSV
-curl http://localhost:8000/export?format=csv
+curl http://localhost:5000/e-tracker/export?format=csv
 
 # Get URLs from specific date range
-curl "http://localhost:8000/urls?start_date=2024-01-01&end_date=2024-01-31"
+curl "http://localhost:5000/e-tracker/urls?start_date=2024-01-01&end_date=2024-01-31"
 ```
 
 ## Data Files
@@ -112,7 +112,8 @@ curl "http://localhost:8000/urls?start_date=2024-01-01&end_date=2024-01-31"
     "url": "https://example.com",
     "title": "Example Page",
     "timestamp": "2024-01-01T12:00:00.000Z",
-    "server_timestamp": "2024-01-01T12:00:00.123456"
+    "server_timestamp": "2024-01-01T12:00:00.123456",
+    "domin": "example.com"
   }
 ]
 ```

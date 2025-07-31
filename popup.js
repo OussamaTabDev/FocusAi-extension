@@ -815,7 +815,7 @@ function testConnectionStatus() {
         dot.style.backgroundColor = '#f1c40f'; // Yellow for checking
         text.textContent = 'Checking...';
 
-        fetch('http://localhost:8000/ping')
+        fetch('http://localhost:5000/e-tracker/ping')
             .then(response => {
                 if (!response.ok) throw new Error('Not connected');
                 return response.json();
